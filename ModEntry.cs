@@ -19,6 +19,9 @@ namespace QuickEat
 
             // 키 입력 이벤트 구독
             helper.Events.Input.ButtonPressed += OnButtonPressed;
+
+            // 먹기 확인창 자동으로 Yes 선택
+            helper.Events.Display.MenuChanged += OnMenuChanged;
         }
 
         private void OnButtonPressed(object? sender, ButtonPressedEventArgs e)
@@ -62,39 +65,57 @@ namespace QuickEat
             // 바닐라 '먹기' 루틴을 그대로 호출
             bool didEat = TryInvokeVanillaEat(player, heldObj);
 
-            // 대기 상태 정리
-            // 메뉴가 안 떴는데 itemToEat이 남아 있으면 해제 (다음 입력 막힘 방지)
-            if (Game1.activeClickableMenu == null && itemToEatField?.GetValue(player) != null)
-            {
-                itemToEatField.SetValue(player, null);
-                this.Monitor.Log("섭취 대기 상태 해제(itemToEat=null)", LogLevel.Trace);
-            }
-
-
-            // 스택 보정
-            if (didEat)
-            {
-                // 스택이 그대로면 보정
-                if (player.CurrentItem is SObject after
-                && ReferenceEquals(after, heldObj)
-                && after.Stack == beforeStack)
-                {
-                    player.reduceActiveItemByOne();
-                    this.Monitor.Log("스택 보정: reduceActiveItemByOne()", LogLevel.Trace);
-                }
-            }
-            else
+            if (!didEat)
             {
                 this.Monitor.Log("먹기 호출에 실패했습니다. 게임 / SMAPI 버전을 확인해주세요.", LogLevel.Trace);
             }
+        }
 
+        private void OnMenuChanged(object? sender, MenuChangedEventArgs e)
+        {
+            if (!Context.IsWorldReady) return;
 
+            if (e.NewMenu is DialogueBox db)
+            {
+                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+                // 현재 '먹기 대기' 상태인지 확인
+                var itemToEatField = typeof(Farmer).GetField("itemToEat", flags);
+                var toEat = itemToEatField?.GetValue(Game1.player) as SObject;
+                if (toEat == null) return;
+
+                try
+                {
+                    // DialogueBox.responses: List<Response>
+                    var responsesField = typeof(DialogueBox).GetField("responses", flags);
+                    var responses = responsesField?.GetValue(db) as System.Collections.Generic.List<Response>;
+                    if (responses == null || responses.Count == 0) return;
+
+                    Response? yes = null;
+                    foreach (var r in responses)
+                    {
+                        if (string.Equals(r.responseKey, "Yes", StringComparison.OrdinalIgnoreCase))
+                        { yes = r; break; }
+                    }
+                    if (yes == null) return;
+
+                    // answerDialogue(Response) -> 자동 yes
+                    var answerMethod = typeof(DialogueBox).GetMethod("answerDialogue", flags, null
+                    , new[] { typeof(Response) }, null);
+                    answerMethod?.Invoke(db, new object[] { yes });
+
+                    this.Monitor.Log($"먹기 자동 확인: {toEat.DisplayName}", LogLevel.Info);
+                }
+                catch (Exception ex)
+                {
+                    this.Monitor.Log($"먹기 자동 확인 실패: {ex}", LogLevel.Warn);
+                }
+            }
         }
 
         /// <summary>
-        /// 바닐라 Farmer.eatObject(...) 메서드를 리플렉션으로 호출한다.
-        /// 1.6 계열에서 시그니처가 달라도 대응하도록 1개 / 2개 인수(overrideFullness) 모두 시도.
-        /// </summary>
+        /// 바닐라 메서드를 리플렉션으로 호출한다.
+        /// </summary>a
         private bool TryInvokeVanillaEat(Farmer player, SObject food)
         {
             try
