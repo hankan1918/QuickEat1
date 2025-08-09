@@ -3,6 +3,7 @@ using System.Reflection;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
+using StardewValley.Menus; // DialogueBox, Response
 using SObject = StardewValley.Object;
 
 namespace QuickEat
@@ -47,6 +48,7 @@ namespace QuickEat
 
             // 이미 먹는 중이거나 대기 상태일 때는 중복 호출 방지
             // (SpaceCore 문서 등에서 player.itemToEat)
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             var itemToEatField = typeof(Farmer).GetField("itemToEat", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             if (itemToEatField?.GetValue(player) != null)
             {
@@ -54,17 +56,31 @@ namespace QuickEat
                 return;
             }
 
+            // 먹기 시도전 스택 기록하기
             int beforeStack = heldObj.Stack;
 
             // 바닐라 '먹기' 루틴을 그대로 호출
-            if (TryInvokeVanillaEat(player, heldObj))
+            bool didEat = TryInvokeVanillaEat(player, heldObj);
+
+            // 대기 상태 정리
+            // 메뉴가 안 떴는데 itemToEat이 남아 있으면 해제 (다음 입력 막힘 방지)
+            if (Game1.activeClickableMenu == null && itemToEatField?.GetValue(player) != null)
+            {
+                itemToEatField.SetValue(player, null);
+                this.Monitor.Log("섭취 대기 상태 해제(itemToEat=null)", LogLevel.Trace);
+            }
+
+
+            // 스택 보정
+            if (didEat)
             {
                 // 스택이 그대로면 보정
                 if (player.CurrentItem is SObject after
                 && ReferenceEquals(after, heldObj)
                 && after.Stack == beforeStack)
                 {
-                    player.reduceActiveItemByOne;
+                    player.reduceActiveItemByOne();
+                    this.Monitor.Log("스택 보정: reduceActiveItemByOne()", LogLevel.Trace);
                 }
             }
             else
