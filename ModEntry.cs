@@ -1,5 +1,7 @@
 ﻿using System;
+using System.ComponentModel.Design;
 using System.Reflection;
+using Microsoft.Xna.Framework;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
@@ -12,6 +14,11 @@ namespace QuickEat
     {
         private ModConfig config = new();
 
+        private bool pendingCleanup = false;
+        private int cleanupTicksLeft = 0;
+        private SObject? lastFoodRef = null;
+        private int lastFoodStackBefore = 0;
+
         public override void Entry(IModHelper helper)
         {
             // 설정 파일을 로드한다.
@@ -22,6 +29,8 @@ namespace QuickEat
 
             // 먹기 확인창 자동으로 Yes 선택
             helper.Events.Display.MenuChanged += OnMenuChanged;
+
+            helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
         }
 
         private void OnButtonPressed(object? sender, ButtonPressedEventArgs e)
@@ -59,8 +68,9 @@ namespace QuickEat
                 return;
             }
 
-            // 먹기 시도전 스택 기록하기
-            int beforeStack = heldObj.Stack;
+            // 먹기 시도전 기록하기
+            this.lastFoodRef = heldObj;
+            this.lastFoodStackBefore = heldObj.Stack;
 
             // 바닐라 '먹기' 루틴을 그대로 호출
             bool didEat = TryInvokeVanillaEat(player, heldObj);
@@ -68,7 +78,51 @@ namespace QuickEat
             if (!didEat)
             {
                 this.Monitor.Log("먹기 호출에 실패했습니다. 게임 / SMAPI 버전을 확인해주세요.", LogLevel.Trace);
+                return;
             }
+
+            // 약간의 시간 후 보정
+            this.pendingCleanup = true;
+            this.cleanupTicksLeft = 45; // 30-60 사이 적절하게 설정.
+        }
+
+        private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
+        {
+            if (!this.pendingCleanup) return;
+            if (this.cleanupTicksLeft > 0) { this.cleanupTicksLeft--; return; }
+
+            var player = Game1.player;
+
+            // 아직 메뉴 열려있거나(확인창 등), 모션 중이면 다음 틱으로 미룸
+            if (Game1.activeClickableMenu != null
+            || !player.CanMove) return;
+
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var itemToEatField = typeof(Farmer).GetField("itemToEat", flags);
+
+            // 대기 상태 남아 있으면 정리
+            if (itemToEatField?.GetValue(player) != null)
+            {
+                itemToEatField.SetValue(player, null);
+                this.Monitor.Log("지연 보정: itemToEat=null", LogLevel.Trace);
+            }
+
+            // 스택 보정: 여전히 그대로면 1 감소
+            if (this.lastFoodRef != null
+            && player.CurrentItem is SObject after
+            && ReferenceEquals(after, this.lastFoodRef))
+            {
+                if (after.Stack == this.lastFoodStackBefore)
+                {
+                    player.reduceActiveItemByOne();
+                    this.Monitor.Log("지연 보정: 스택 1 감소", LogLevel.Trace);
+                }
+            }
+
+            // 종료
+            this.pendingCleanup = false;
+            this.lastFoodRef = null;
+
         }
 
         private void OnMenuChanged(object? sender, MenuChangedEventArgs e)
@@ -115,13 +169,32 @@ namespace QuickEat
 
         /// <summary>
         /// 바닐라 메서드를 리플렉션으로 호출한다.
-        /// </summary>a
+        /// </summary>
         private bool TryInvokeVanillaEat(Farmer player, SObject food)
         {
             try
             {
                 var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                var mPerform = typeof(SObject).GetMethod("performUseAction", flags, null,
+                new[] { typeof(GameLocation), typeof(Farmer) }, null);
+                if (mPerform != null)
+                {
+                    mPerform.Invoke(food, new object[] { Game1.currentLocation, player });
+                    this.Monitor.Log($"먹기 실행(performUseAction): {food.DisplayName}", LogLevel.Info);
+                    return true;
+                }
+
+
                 var farmerType = typeof(Farmer);
+
+                // eatObject(Object, bool)
+                var m2 = farmerType.GetMethod("eatObject", flags, null, new[] { typeof(SObject), typeof(bool) }, null);
+                if (m2 != null)
+                {
+                    m2.Invoke(player, new object[] { food, true });
+                    this.Monitor.Log($"먹기 실행(eatObject, overrideFullness=true): {food.DisplayName}", LogLevel.Info);
+                    return true;
+                }
 
                 // tryToEat(Object) -> bool
                 var tryToEat = farmerType.GetMethod("tryToEat", flags, null, new[] { typeof(SObject) }, null);
@@ -141,15 +214,6 @@ namespace QuickEat
                 {
                     m1.Invoke(player, new object[] { food });
                     this.Monitor.Log($"먹기 실행: {food.DisplayName}", LogLevel.Info);
-                    return true;
-                }
-
-                // eatObject(Object, bool)
-                var m2 = farmerType.GetMethod("eatObject", flags, null, new[] { typeof(SObject), typeof(bool) }, null);
-                if (m2 != null)
-                {
-                    m2.Invoke(player, new object[] { food, false /* 기본 동작 유지 */ });
-                    this.Monitor.Log($"먹기 실행(overrideFullness=false): {food.DisplayName}", LogLevel.Info);
                     return true;
                 }
             }
