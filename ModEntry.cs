@@ -54,11 +54,25 @@ namespace QuickEat
                 return;
             }
 
+            int beforeStack = heldObj.Stack;
+
             // 바닐라 '먹기' 루틴을 그대로 호출
-            if (!TryInvokeVanillaEat(player, heldObj))
+            if (TryInvokeVanillaEat(player, heldObj))
+            {
+                // 스택이 그대로면 보정
+                if (player.CurrentItem is SObject after
+                && ReferenceEquals(after, heldObj)
+                && after.Stack == beforeStack)
+                {
+                    player.reduceActiveItemByOne
+                }
+            }
+            else
             {
                 this.Monitor.Log("먹기 호출에 실패했습니다. 게임 / SMAPI 버전을 확인해주세요.", LogLevel.Trace);
             }
+
+
         }
 
         /// <summary>
@@ -69,10 +83,23 @@ namespace QuickEat
         {
             try
             {
+                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
                 var farmerType = typeof(Farmer);
 
-                // 우선 (Object) 시그니처 시도
-                var m1 = farmerType.GetMethod("eatObject", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(SObject) }, null);
+                // tryToEat(Object) -> bool
+                var tryToEat = farmerType.GetMethod("tryToEat", flags, null, new[] { typeof(SObject) }, null);
+                if (tryToEat != null)
+                {
+                    var ok = tryToEat.Invoke(player, new object[] { food }) as bool?;
+                    if (ok == true)
+                    {
+                        this.Monitor.Log($"먹기 실행(tryToEat): {food.DisplayName}", LogLevel.Info);
+                        return true;
+                    }
+                }
+
+                // eatObject(Object)
+                var m1 = farmerType.GetMethod("eatObject", flags, null, new[] { typeof(SObject) }, null);
                 if (m1 != null)
                 {
                     m1.Invoke(player, new object[] { food });
@@ -80,25 +107,13 @@ namespace QuickEat
                     return true;
                 }
 
-                // 다음 (Object, bool overrideFullness) 시도 (오버로드 대응)
-                var m2 = farmerType.GetMethod("eatObject", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(SObject), typeof(bool) }, null);
+                // eatObject(Object, bool)
+                var m2 = farmerType.GetMethod("eatObject", flags, null, new[] { typeof(SObject), typeof(bool) }, null);
                 if (m2 != null)
                 {
                     m2.Invoke(player, new object[] { food, false /* 기본 동작 유지 */ });
                     this.Monitor.Log($"먹기 실행(overrideFullness=false): {food.DisplayName}", LogLevel.Info);
                     return true;
-                }
-
-                // 다른 경로: tryToEat / performUseAction 등 이름이 다른 경우 대비(드물지만)
-                var alt = farmerType.GetMethod("tryToEat", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(SObject) }, null);
-                if (alt != null)
-                {
-                    var ok = alt.Invoke(player, new object[] { food }) as bool?;
-                    if (ok == true)
-                    {
-                        this.Monitor.Log($"먹기 실행(tryToEat): {food.DisplayName}", LogLevel.Info);
-                        return true;
-                    }
                 }
             }
             catch (TargetInvocationException tex)
