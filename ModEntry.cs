@@ -42,6 +42,7 @@ namespace QuickEat
             if (heldObj.Edibility == -300)
             {
                 this.Monitor.Log($"섭취 불가능한 아이템: {heldObj.DisplayName}");
+                return;
             }
 
             // 이미 먹는 중이거나 대기 상태일 때는 중복 호출 방지
