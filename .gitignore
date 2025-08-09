@@ -1,0 +1,17 @@
+# .NET build
+bin/
+obj/
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+*.cache
+*.log
+
+# packaged artifacts
+*.zip
+
+# OS / IDE
+.DS_Store
+.vs/
+.idea/
+.vscode/
