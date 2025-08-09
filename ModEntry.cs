@@ -64,7 +64,7 @@ namespace QuickEat
                 && ReferenceEquals(after, heldObj)
                 && after.Stack == beforeStack)
                 {
-                    player.reduceActiveItemByOne
+                    player.reduceActiveItemByOne;
                 }
             }
             else
