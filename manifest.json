@@ -1,0 +1,10 @@
+{
+  "Name": "QuickEat",
+  "Author": "hankan1918",
+  "Version": "1.0.0",
+  "Description": "Press the key to automatically consume the item in your hand.",
+  "UniqueID": "hankan1918.QuickEat",
+  "EntryDll": "QuickEat.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": []
+}
